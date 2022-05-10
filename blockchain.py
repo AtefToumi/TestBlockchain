@@ -5,7 +5,25 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 import requests
+from Crypto.Hash import SHA256
+from Crypto.PublicKey import RSA
+from Crypto.Signature import pkcs1_15
 from flask import Flask, jsonify, request
+
+key = RSA.generate(2048)
+f = open('private_key.pem', 'wb')
+f.write(key.export_key('PEM'))
+f.close()
+
+f = open('private_key.pem', 'r')
+private_key = RSA.import_key(f.read())
+
+x = open('public_key.pem', 'wb')
+x.write(key.public_key().export_key())
+x.close()
+
+x = open('public_key.pem', 'r')
+public_key = RSA.import_key(x.read())
 
 
 class Blockchain:
@@ -31,6 +49,21 @@ class Blockchain:
             self.nodes.add(parsed_url.path)
         else:
             raise ValueError('Invalid URL')
+
+    # def valid_block(self, block):
+    #     """
+    #     Determine if a block is valid
+    #     :param block: block
+    #     :return: True if valid, False if not
+    #     """
+    #
+    #     signature = block['signature']
+    #     try:
+    #         pkcs1_15.new(public_key).verify(h, signature)
+    #         return True
+    #     except (ValueError, TypeError):
+    #         return False
+
 
     def valid_chain(self, chain):
         """
@@ -101,13 +134,18 @@ class Blockchain:
         :param previous_hash: Hash of previous Block
         :return: New Block
         """
-
+        index = len(self.chain) + 1
+        timestamp = time()
+        transactions = self.current_transactions
+        to_hash = str(index) + str(timestamp) + str(transactions) + str(proof) + previous_hash
+        h = SHA256.new(to_hash.encode('utf-8'))
         block = {
-            'index': len(self.chain) + 1,
-            'timestamp': time(),
-            'transactions': self.current_transactions,
+            'index': index,
+            'timestamp': timestamp,
+            'transactions': transactions,
             'proof': proof,
             'previous_hash': previous_hash or self.hash(self.chain[-1]),
+            'signature' : pkcs1_15.new(private_key).sign(h).hex()
         }
 
         # Reset the current list of transactions
@@ -124,10 +162,14 @@ class Blockchain:
         :param amount: Amount
         :return: The index of the Block that will hold this transaction
         """
+        to_hash = sender + recipient + str(amount)
+        h = SHA256.new(to_hash.encode('utf-8'))
+
         self.current_transactions.append({
             'sender': sender,
             'recipient': recipient,
             'amount': amount,
+            'signature': pkcs1_15.new(private_key).sign(h).hex()
         })
 
         return self.last_block['index'] + 1
@@ -215,6 +257,7 @@ def mine():
         'transactions': block['transactions'],
         'proof': block['proof'],
         'previous_hash': block['previous_hash'],
+        'signature' : block['signature']
     }
     return jsonify(response), 200
 
